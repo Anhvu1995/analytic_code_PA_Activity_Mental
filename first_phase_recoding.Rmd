@@ -1,0 +1,158 @@
+---
+title: "first_phase_recoding"
+output:
+  html_document: default
+  word_document: default
+date: "2025-02-05"
+---
+
+```{r}
+# Load packages
+packages <- c("haven", "dplyr", "descr", "tableone", "flextable", "labelled", 
+              "kableExtra", "gridExtra", "ggplot2", "car", "lmtest", "sandwich", 
+              "boot", "nortest", "ggfortify")
+lapply(packages, library, character.only = TRUE)
+
+```
+
+```{r}
+#read
+BRFSS_2023 <- read_xpt("LLCP2023.XPT")
+
+summary(BRFSS_2023)
+```
+
+### Recoding
+
+```{r}
+# Helper to track sample size at each step
+track_n <- function(df, step_name, log) {
+  log[[length(log) + 1]] <- data.frame(step = step_name, n = nrow(df))
+  log
+}
+
+n_log <- list()
+n_log <- track_n(BRFSS_2023.small, "0. Starting sample", n_log)
+
+BRFSS_2023.recoded <- BRFSS_2023.small
+
+# Sex
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SEX %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "1. Sex filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(SEX = recode_factor(SEX, `1`="Male", `2`="Female", `3`="Unspecified or another gender identity"))
+
+# Age
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(AGE80 >= 18, AGE80 <= 24)
+n_log <- track_n(BRFSS_2023.recoded, "2. Age 18-24 filter", n_log)
+
+# Ethnicity (no filter, just recode - skip tracking, no rows dropped)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(IMPRACE = recode_factor(IMPRACE,
+                                 `1`="White, Non-Hispanic", `2`="Black, Non-Hispanic",
+                                 `3`="Asian, Non-Hispanic", `4`="American Indian/Alaskan Native, Non-Hispanic",
+                                 `5`="Hispanic", `6`="Other race, Non-Hispanic"))
+
+# Income
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(INCOMG1 != "9")
+n_log <- track_n(BRFSS_2023.recoded, "3. Income filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(INCOMG1 = recode_factor(INCOMG1,
+                                 `1`="Less than $15,000", `2`="$15,000 - $25,000",
+                                 `3`="$25,000 - $35,000", `4`="$35,000 - $50,000",
+                                 `5`="$50,000 - $100,000", `6`="$100,000 - $200,000",
+                                 `7`="$200,000 or more"))
+
+# MENTHLTH outcome
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(MENTHLTH = if_else(MENTHLTH == 88, 0, MENTHLTH)) %>%
+  filter(!MENTHLTH %in% c(77, 99))
+n_log <- track_n(BRFSS_2023.recoded, "4. MENTHLTH filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(MENTHLTH_BIN = as.integer(MENTHLTH >= 14))
+
+# Exercise any
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(EXERANY2 == "1") %>% select(-EXERANY2)
+n_log <- track_n(BRFSS_2023.recoded, "5. EXERANY2 filter", n_log)
+
+# Exercise type
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!EXRACT12 %in% c("77", "99"))
+n_log <- track_n(BRFSS_2023.recoded, "6. EXRACT12 filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(EXRACT12 = recode_factor(EXRACT12,
+                                  `1`="Walking", `2`="Running or jogging", `3`="Gardening or yard work",
+                                  `4`="Bicycling", `5`="Aerobics", `6`="Calisthenics", `7`="Elliptical/EFX",
+                                  `8`="Household activities", `9`="Weight lifting", `10`="Yoga/Pilates/Tai Chi", `11`="Other"))
+
+# PA freq/strength
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!PAFREQ1_ %in% 99000) %>% mutate(PAFREQ1_ = PAFREQ1_ / 1000)
+n_log <- track_n(BRFSS_2023.recoded, "7. PAFREQ1_ filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!STRFREQ_ %in% 99000) %>% mutate(STRFREQ_ = STRFREQ_ / 1000)
+n_log <- track_n(BRFSS_2023.recoded, "8. STRFREQ_ filter", n_log)
+
+# Depression
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!ADDEPEV3 %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "9. ADDEPEV3 filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(ADDEPEV3 = recode_factor(ADDEPEV3, `1`="Yes", `2`="No"))
+
+# Life satisfaction
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!LSATISFY %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "10. LSATISFY filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(LSATISFY = recode_factor(LSATISFY, `1`="Very satisfied", `2`="Satisfied", `3`="Dissatisfied", `4`="Very dissatisfied"))
+
+# Emotional support
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!EMTSUPRT %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "11. EMTSUPRT filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(EMTSUPRT = recode_factor(EMTSUPRT, `1`="Always", `2`="Usually", `3`="Sometimes", `4`="Rarely", `5`="Never"))
+
+# Loneliness
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDLONELY %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "12. SDLONELY filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(SDLONELY = recode_factor(SDLONELY, `1`="Always", `2`="Usually", `3`="Sometimes", `4`="Rarely", `5`="Never"))
+
+# Stress
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDHSTRE1 %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "13. SDHSTRE1 filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  mutate(SDHSTRE1 = recode_factor(SDHSTRE1, `1`="Always", `2`="Usually", `3`="Sometimes", `4`="Rarely", `5`="Never"))
+
+# SES indicators
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDHEMPLY %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "14. SDHEMPLY filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(SDHEMPLY = recode_factor(SDHEMPLY, `1`="Yes", `2`="No"))
+
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!FOODSTMP %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "15. FOODSTMP filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(FOODSTMP = recode_factor(FOODSTMP, `1`="Yes", `2`="No"))
+
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDHBILLS %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "16. SDHBILLS filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(SDHBILLS = recode_factor(SDHBILLS, `1`="Yes", `2`="No"))
+
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDHUTILS %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "17. SDHUTILS filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(SDHUTILS = recode_factor(SDHUTILS, `1`="Yes", `2`="No"))
+
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% filter(!SDHTRNSP %in% c("7", "9"))
+n_log <- track_n(BRFSS_2023.recoded, "18. SDHTRNSP filter", n_log)
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% mutate(SDHTRNSP = recode_factor(SDHTRNSP, `1`="Yes", `2`="No"))
+
+# Listwise deletion
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>% na.omit()
+n_log <- track_n(BRFSS_2023.recoded, "19. na.omit()", n_log)
+
+# Drop small PA groups
+BRFSS_2023.recoded <- BRFSS_2023.recoded %>%
+  filter(!EXRACT12 %in% c("Household activities", "Aerobics", "Elliptical/EFX")) %>%
+  mutate(EXRACT12 = droplevels(EXRACT12))
+n_log <- track_n(BRFSS_2023.recoded, "20. Drop small PA groups", n_log)
+
+# Build attrition table
+attrition <- do.call(rbind, n_log)
+attrition$dropped <- c(NA, diff(-diff(c(attrition$n, NA))) * 0)  # placeholder, replaced below
+attrition$dropped <- c(NA, -diff(attrition$n))
+print(attrition)
+```
