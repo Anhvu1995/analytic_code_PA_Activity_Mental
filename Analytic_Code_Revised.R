@@ -32,7 +32,7 @@ packages <- c(
   "sandwich", "nortest", "ggfortify", "broom", "stringr",
   "lm.beta", "effectsize", "rstatix", "FSA", "flextable",
   "tableone", "survey", "labelled", "gridExtra", "scales",
-  "DescTools", "tibble", "forcats"
+  "DescTools", "tibble", "forcats", "patchwork"
 )
 lapply(packages, library, character.only = TRUE)
 
@@ -622,64 +622,112 @@ print(fig3)
 
 
 # --- Figure 5: Odds ratios - logistic model ---
-keep_terms <- c("ADDEPEV3", "LSATISFY", "EMTSUPRT", "SDLONELY",
-                "SDHSTRE1", "SEX", "EXRACT12", "PAFREQ1_", "STRFREQ_")
+term_labels <- c(
+  "AGE80"                         = "Age",
+  "INCOMG1"                       = "",
+  "ADDEPEV3No"                    = "No",
+  "LSATISFY"                      = "",
+  "EMTSUPRT"                      = "",
+  "SDLONELY"                      = "",
+  "SDHSTRE1"                      = "",
+  "EXRACT12"                      = "",
+  "PAFREQ1_"                      = "PA Frequency (per wk)",
+  "PADUR1_"                       = "Session Duration (min)",
+  "MINAC12"                       = "Primary PA min (per wk)",
+  "STRFREQ_"                      = "Strength Freq. (per wk)",
+  "SDHEMPLY"                      = "Job Loss - ",
+  "FOODSTMP"                      = "Food Stamps - ",
+  "SDHBILLS"                      = "Unpaid Bills - ",
+  "SDHUTILS"                      = "Utility Issues - ",
+  "SDHTRNSP"                      = "Transport Barrier - ",
+  "SEXFemale"                     = "Female",
+  "SEXUnspecified or another gender identity" = "Nonbinary",
+  "IMPRACEBlack, Non-Hispanic"    = "Black",
+  "IMPRACEAsian, Non-Hispanic"    = "Asian",
+  "IMPRACEHispanic"               = "Hispanic",
+  "IMPRACEOther race, Non-Hispanic" = "Others",
+  "IMPRACEAmerican Indian/Alaskan Native, Non-Hispanic" = "American Indian/Alaskan Native"
+)
 
 or_plot_data <- logit_tidy %>%
-  filter(term != "(Intercept)") %>%                       # keep every predictor
-  mutate(term_clean = str_replace_all(term, c(
-    "AGE80"                         = "Age",
-    "INCOMG1"                       = "Income - ",
-    "ADDEPEV3No"                    = "Depression History - No",
-    "LSATISFY"                      = "Life Satisfaction - ",
-    "EMTSUPRT"                      = "Emotional Support - ",
-    "SDLONELY"                      = "Loneliness - ",
-    "SDHSTRE1"                      = "Stress - ",
-    "EXRACT12"                      = "PA Type - ",
-    "PAFREQ1_"                      = "PA Frequency (per wk)",
-    "PADUR1_"                       = "Session Duration (min)",
-    "MINAC12"                       = "Primary PA min (per wk)",
-    "STRFREQ_"                      = "Strength Freq. (per wk)",
-    "SDHEMPLY"                      = "Job Loss - ",
-    "FOODSTMP"                      = "Food Stamps - ",
-    "SDHBILLS"                      = "Unpaid Bills - ",
-    "SDHUTILS"                      = "Utility Issues - ",
-    "SDHTRNSP"                      = "Transport Barrier - ",
-    "SEXFemale"                     = "Sex - Female",
-    "SEXUnspecified or another gender identity" = "Sex - Nonbinary",
-    "IMPRACEBlack, Non-Hispanic"    = "Race - Black",
-    "IMPRACEAsian, Non-Hispanic"    = "Race - Asian",
-    "IMPRACEHispanic"               = "Race - Hispanic",
-    "IMPRACEOther race, Non-Hispanic" = "Race - Others",
-    "IMPRACEAmerican Indian/Alaskan Native, Non-Hispanic" = "Race - American Indian/Alaskan Native"
-  )),
-  # 3 decimals for very narrow CIs (e.g., minutes, duration), otherwise 2
-  label_text = ifelse(Upper_CI - Lower_CI < 0.05,
-                      sprintf("[%.3f, %.3f], %s", Lower_CI, Upper_CI, p_fmt),
-                      sprintf("[%.2f, %.2f], %s", Lower_CI, Upper_CI, p_fmt))
+  filter(term != "(Intercept)") %>%
+  mutate(
+    term_clean = str_replace_all(term, term_labels),
+    
+    # Assign each predictor to a group (based on the raw BRFSS variable name)
+    group = case_when(
+      str_detect(term, "^(SEX)")                     ~ "Sex",
+      str_detect(term, "^(AGE80)")                     ~ "Age",
+      str_detect(term, "^(IMPRACE)")                     ~ "Race",
+      str_detect(term, "^(INCOMG1)")                     ~ "Income",
+      str_detect(term, "^(EXRACT12)")    ~ "Physical Activity\nType",
+      str_detect(term, "^(PAFREQ1_|PADUR1_|MINAC12|STRFREQ_)")    ~ "Physical\nModality",
+      str_detect(term, "^(ADDEPEV3)")  ~ "Depression Diagnosis",
+      str_detect(term, "^(LSATISFY)")  ~ "Life Satisfaction",
+      str_detect(term, "^(EMTSUPRT)")  ~ "Emotional Support",
+      str_detect(term, "^(SDLONELY)")  ~ "Loneliness",
+      str_detect(term, "^(SDHSTRE1)")  ~ "Stress",
+      str_detect(term, "^(SDHEMPLY|FOODSTMP|SDHBILLS|SDHUTILS|SDHTRNSP)")  ~ "Social\nDeterminants",
+      TRUE                                                                 ~ "Other"
+    ),
+    group = factor(group, levels = c("Sex",
+                                     "Age",
+                                     "Race",
+                                     "Income",
+                                     "Physical Activity\nType",
+                                     "Physical\nModality",
+                                     "Mental Health &\nSocial Support",
+                                     "Depression Diagnosis",
+                                     "Life Satisfaction",
+                                     "Emotional Support",
+                                     "Loneliness",
+                                     "Stress",
+                                     "Social\nDeterminants",
+                                     "Other")),
+    
+    # CI text: 3 decimals for very narrow CIs, otherwise 2
+    ci_text = ifelse(Upper_CI - Lower_CI < 0.05,
+                     sprintf("%.3f – %.3f", Lower_CI, Upper_CI),
+                     sprintf("%.2f – %.2f", Lower_CI, Upper_CI)),
+    
+    # Order rows by OR (within each group once faceted)
+    term_clean = fct_reorder(term_clean, OR)
+  ) %>%
+  droplevels()
+
+# Left panel: variable names + CI + p-value
+table_data <- or_plot_data %>%
+  mutate(variable = as.character(term_clean),
+         p_fmt    = as.character(p_fmt)) %>%
+  select(group, term_clean, variable, ci_text, p_fmt) %>%
+  pivot_longer(c(variable, ci_text, p_fmt),
+               names_to = "column", values_to = "value") %>%
+  mutate(column = factor(column,
+                         levels = c("variable", "ci_text", "p_fmt"),
+                         labels = c("Variable", "95% CI", "p-value")))
+
+# Right panel: table plot with group strips on the right
+table_txt <- 3.2   
+header_txt <- 10   
+
+p_table <- ggplot(table_data, aes(x = column, y = term_clean, label = value)) +
+  geom_text(data = filter(table_data, column == "Variable"),
+            hjust = 0, nudge_x = -0.45, size = table_txt, colour = "grey20") +
+  geom_text(data = filter(table_data, column != "Variable"),
+            size = table_txt, colour = "grey20") +
+  scale_x_discrete(position = "top") +
+  facet_grid(group ~ ., scales = "free_y", space = "free_y") +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid      = element_blank(),
+    axis.text.y     = element_blank(),
+    axis.text.x.top = element_text(face = "bold", size = header_txt),
+    strip.text      = element_blank(),
+    panel.spacing   = unit(6, "pt")
   )
 
-# Put all CI/p labels in one column to the right of the widest interval,
-# so they don't collide with long error bars across 46 rows
-label_y <- max(or_plot_data$Upper_CI, na.rm = TRUE) * 1.6
-
-fig5 <- ggplot(or_plot_data,
-               aes(x = reorder(term_clean, OR), y = OR)) +
-  geom_point(size = 1.8) +
-  geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.25) +
-  geom_hline(yintercept = 1, linetype = "dashed", colour = "red") +
-  geom_text(aes(label = label_text, y = label_y),
-            hjust = 0, size = 2.3, color = "grey20") +
-  coord_flip(clip = "off") +
-  scale_y_log10(labels = number_format(accuracy = 0.01),
-                expand = expansion(mult = c(0.05, 0.60))) +
-  labs(
-    x = NULL,
-    y = "Odds Ratio (log scale, 95% CI)"
-  ) +
-  theme_minimal(base_size = 10) +
-  theme(axis.text.y = element_text(size = 7),
-        plot.margin = margin(5, 40, 5, 5))
+fig5 <- p_table + p_forest + plot_layout(widths = c(1.5, 1.8))
 print(fig5)
 
 # ========================================================
